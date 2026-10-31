@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alternative Credit Scoring</title>
+<meta name="description" content="A credit scorecard built from telco behaviour: top-ups, tenure, a stable home at night, zero-balance days. Synthetic Jabodetabek subscribers, real method (WoE binning, logistic regression, points).">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Alternative credit scoring from telco behaviour. Data from data/credit.json, written by scripts/build_data.py. */
+:root { --bg: #0b0d17; --panel: #12142200; --card: #141626; --fg: #f4f4f8; --muted: #9298b0; --ink2: #c9cbd8; --line: rgba(255,255,255,.12); --accent: #9a9df0; --good: #5fd3a5; --bad: #ff7a6b; --warn: #ffc15e; --well: rgba(255,255,255,.06); --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14.5px/1.5 "Archivo", -apple-system, "Helvetica Neue", Arial, sans-serif; }
+body { padding: 0 16px 48px; }
+.wrap { max-width: 1240px; margin: 0 auto; }
+header { padding: 26px 0 8px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px 24px; }
+.kick { font: 500 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin: 0; }
+h1 { font-weight: 800; font-size: clamp(26px, 4vw, 36px); letter-spacing: -0.03em; line-height: 1.04; margin: 8px 0 0; }
+.lede { margin: 8px 0 0; color: var(--ink2); max-width: 46em; }
+.pill { display: inline-block; margin-top: 10px; font: 500 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); border: 1.5px solid var(--accent); border-radius: 999px; padding: 2px 9px; }
+.tabs { display: flex; gap: 4px; }
+.tabs button { font: 600 13px "Archivo", sans-serif; color: var(--muted); background: none; border: 0; border-bottom: 3px solid var(--line); padding: 6px 14px; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.grid { display: grid; gap: 16px; margin-top: 16px; }
+.g2 { grid-template-columns: 1fr 1fr; }
+.g-sc { grid-template-columns: 380px 1fr; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+.card h2 { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+.card .note { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
+.sec { margin: 14px 0 6px; font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chips button { font: 600 12px "Archivo", sans-serif; color: var(--fg); background: var(--well); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; cursor: pointer; }
+.chips button:hover { border-color: var(--accent); color: var(--accent); }
+.chips button[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: #0b0d17; }
+.about { margin: 8px 0 0; color: var(--ink2); font-size: 13px; min-height: 2.6em; }
+.sl { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; margin-top: 9px; font-size: 12.5px; }
+.sl label { color: var(--ink2); }
+.sl output { font: 12px var(--mono); color: var(--fg); text-align: right; }
+.sl input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+.scorebox { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; }
+.big { font-weight: 800; font-size: 56px; letter-spacing: -0.03em; line-height: .9; font-variant-numeric: tabular-nums; }
+.band { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; border-radius: 999px; padding: 4px 12px; color: #0b0d17; }
+.band.approve { background: var(--good); } .band.review { background: var(--warn); } .band.decline { background: var(--bad); }
+.odds { font: 12px var(--mono); color: var(--muted); }
+.gauge { position: relative; height: 10px; border-radius: 5px; margin: 18px 0 20px; overflow: visible; display: flex; }
+.gauge i { display: block; height: 100%; }
+.gauge b { position: absolute; top: -5px; width: 3px; height: 20px; background: var(--fg); border-radius: 2px; transition: left .35s; }
+.gauge span { position: absolute; top: 14px; font: 10px var(--mono); color: var(--muted); transform: translateX(-50%); }
+.why { display: grid; grid-template-columns: 150px 1fr 40px; gap: 6px 8px; align-items: center; font-size: 12.5px; }
+.why .tr { position: relative; height: 12px; }
+.why .tr::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--muted); }
+.why .tr b { position: absolute; top: 0; bottom: 0; border-radius: 2px; transition: all .35s; }
+.why .v { font: 11.5px var(--mono); text-align: right; }
+table.pts { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pts th { text-align: left; font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 6px 6px; border-bottom: 1px solid var(--line); }
+.pts td { padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,.04); }
+.pts td.n { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.pts tr.f td { padding-top: 10px; font-weight: 700; color: var(--fg); border-bottom: 0; }
+.pts tr.f td small { font-weight: 400; color: var(--muted); }
+.pts tr.on td { background: rgba(154,157,240,.18); color: var(--fg); }
+.pts tr.on td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.pts td.bar { width: 60px; }
+.pts td.bar i { display: block; height: 6px; background: var(--bad); border-radius: 2px; opacity: .8; }
+.tablewrap { overflow-x: auto; }
+.ptgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; }
+@media (max-width: 700px) { .ptgrid { grid-template-columns: 1fr; } }
+svg text { fill: var(--muted); font: 10.5px var(--mono); }
+svg .lab { fill: var(--ink2); font: 12px "Archivo", sans-serif; }
+.kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.kv div { background: var(--well); border-radius: 8px; padding: 7px 10px; }
+.kv b { display: block; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.kv span { font: 11px var(--mono); color: var(--muted); }
+#distsvg { touch-action: none; cursor: ew-resize; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font: 11px var(--mono); color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.mapcard { padding: 0; overflow: hidden; position: relative; }
+.mapcard .hd { position: absolute; z-index: 3; top: 12px; left: 12px; background: rgba(14,16,28,.88); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 330px; backdrop-filter: blur(8px); }
+#map { height: 560px; }
+.ramp { height: 8px; border-radius: 4px; margin-top: 8px; }
+.ramplab { display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--muted); margin-top: 2px; }
+.tip { position: absolute; z-index: 4; pointer-events: none; background: rgba(14,16,28,.95); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 12.5px; max-width: 250px; display: none; }
+.tip b { font-size: 14px; }
+.tip .r { font: 11.5px var(--mono); color: var(--ink2); }
+.foot { margin-top: 18px; color: var(--muted); font-size: 12.5px; }
+.foot a, a { color: var(--accent); }
+.pipe { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.pipe div { flex: 1 1 120px; background: var(--well); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; color: var(--ink2); }
+.pipe div b { display: block; color: var(--fg); }
+.lb td { font-size: 12.5px; }
+.lb tr.best td { color: var(--good); font-weight: 700; }
+[hidden] { display: none !important; }
+body.embed header { display: none; }
+body.embed .foot { display: none; }
+@media (max-width: 980px) { .g-sc, .g2 { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .why { grid-template-columns: 112px 1fr 34px; } #map { height: 520px; } .mapcard .hd { right: 12px; max-width: none; } .big { font-size: 46px; } .kv b { font-size: 17px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <p class="kick">Alternative credit scoring · telco data</p>
+    <h1>A credit score for people with no credit file</h1>
+    <p class="lede">No bank history, but years of phone behaviour. This scorecard turns top-ups, tenure, where the phone sleeps at night and how often the balance hits zero into points, and adds them up.</p>
+    <span class="pill">Simulated subscribers, real method</span>
+  </div>
+  <div class="tabs" role="tablist">
+    <button role="tab" id="t-score" aria-selected="true">Scorecard</button>
+    <button role="tab" id="t-pipe" aria-selected="false">Pipeline</button>
+  </div>
+</header>
+
+<section id="v-score">
+  <div class="grid g-sc">
+    <div class="card">
+      <h2>Applicant</h2>
+      <p class="note">Pick a person or move the sliders.</p>
+      <div class="chips" id="personas" style="margin-top:10px"></div>
+      <p class="about" id="about"></p>
+      <div id="sliders"></div>
+    </div>
+    <div class="card">
+      <div class="scorebox"><div class="big" id="score">600</div><div><span class="band" id="band">approve</span><div class="odds" id="odds"></div></div></div>
+      <div class="gauge" id="gauge"></div>
+      <div class="sec">Why this score <small>points against the average applicant</small></div>
+      <div class="why" id="why"></div>
+      <div class="sec" style="margin-top:18px">Points table</div>
+      <div class="ptgrid" id="pts"></div>
+    </div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>Good and bad borrowers, by score</h2>
+      <p class="note">Holdout set. Drag the cutoff: everyone to the right is approved.</p>
+      <svg id="distsvg" viewBox="0 0 560 230" width="100%"></svg>
+      <div class="legend"><span><i style="background:var(--good)"></i>repaid</span><span><i style="background:var(--bad)"></i>defaulted within 6 months</span></div>
+      <div class="kv"><div><b id="k-appr"></b><span>approval rate</span></div><div><b id="k-bad"></b><span>bad rate, approved</span></div><div><b id="k-gini"></b><span>Gini, holdout</span></div></div>
+    </div>
+    <div class="card">
+      <h2>Is the score still stable?</h2>
+      <p class="note">Population stability index each month against the development sample. Above 0.1, look closer; above 0.25, rebuild.</p>
+      <svg id="psisvg" viewBox="0 0 560 230" width="100%"></svg>
+      <p class="note" id="psinote"></p>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card mapcard">
+      <div class="hd">
+        <h2>Where the score is high and low</h2>
+        <p class="note" id="mapnote">Hexes about 2 km across, column height and colour by average score of subscribers who sleep there. Hover for what lifts or drags the area.</p>
+        <div class="chips" id="metric" style="margin-top:8px"><button aria-pressed="true" data-m="score">Average score</button><button aria-pressed="false" data-m="approve">Approval rate</button></div>
+        <div class="ramp" id="ramp"></div><div class="ramplab"><span id="rlo"></span><span id="rhi"></span></div>
+      </div>
+      <div id="map"></div>
+      <div class="tip" id="tip"></div>
+    </div>
+  </div>
+</section>
+
+<section id="v-pipe" hidden>
+  <div class="grid">
+    <div class="card">
+      <h2>AutoML model search</h2>
+      <p class="note">Every run trains several model families and settings on the same features and ranks them on the same holdout. Each dot is one candidate, measured on this synthetic data.</p>
+      <div class="pipe"><div><b>Prepare</b>bins, WoE, scaling, automated</div><div><b>Search</b><span id="ncand"></span> candidates, 6 families</div><div><b>Compare</b>Gini on a 30% holdout</div><div><b>Ship</b>best model, or the scorecard if it is close</div></div>
+      <svg id="lbsvg" viewBox="0 0 900 330" width="100%" style="margin-top:10px"></svg>
+      <div class="legend" id="lblegend"></div>
+    </div>
+  </div>
+  <div class="grid g2">
+    <div class="card">
+      <h2>Leaderboard</h2>
+      <div class="tablewrap"><table class="pts lb" id="lb"></table></div>
+    </div>
+    <div class="card">
+      <h2>Pipeline run time, before and after</h2>
+      <p class="note">Indexed, old pipeline = 100. The 75% cut is the real result from the client project; the bars are not measured here.</p>
+      <svg id="rtsvg" viewBox="0 0 520 150" width="100%"></svg>
+      <p class="note">Where the time went: features rebuilt for every model by hand, one model family at a time, and manual comparison in spreadsheets. The rebuilt pipeline prepares features once, trains candidates in parallel and writes the leaderboard itself.</p>
+    </div>
+  </div>
+</section>
+
+<p class="foot">Synthetic subscribers in Jabodetabek, generated in <code>scripts/build_data.py</code>; no operator or client data. The scorecard is fitted the usual way: fixed bins, weight of evidence per bin, logistic regression, 600 points at 50:1 odds and 20 points to double the odds. <a href="https://github.com/dhaneswaramandrasa/alt-credit-scoring">Code and data</a> · <a href="https://dhaneswara-mandrasa.vercel.app/project-credit">Case study</a></p>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
+<script>
+(function () {
+  var Q = new URLSearchParams(location.search);
+  if (Q.has('embed')) document.body.classList.add('embed');
+  var MOBILE = matchMedia('(max-width: 560px)').matches;
+  var NS = 'http://www.w3.org/2000/svg';
+  var D, S = { x: {}, persona: null, cut: 0, metric: 'score' };
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function pct(v, d) { return (v * 100).toFixed(d == null ? 0 : d) + '%'; }
+
+  fetch('data/credit.json').then(function (r) { return r.json(); }).then(function (d) { D = d; init(); });
+
+  function binOf(f, v) { for (var i = 0; i < f.edges.length; i++) if (v < f.edges[i]) return i; return f.edges.length; }
+  function fmtVal(f, v) { return f.key === 'topup' ? Math.round(v * 100) + '%' : (Math.round(v * 10) / 10) + ''; }
+  function band(s) { return s >= D.meta.cut_approve ? 'approve' : s >= D.meta.cut_decline ? 'review' : 'decline'; }
+
+  function init() {
+    S.cut = D.meta.cut_approve;
+    // tabs
+    function tab(p) { $('t-score').setAttribute('aria-selected', !p); $('t-pipe').setAttribute('aria-selected', p); $('v-score').hidden = p; $('v-pipe').hidden = !p; if (p) drawPipeline(); else if (map) map.resize(); }
+    $('t-score').onclick = function () { tab(false); }; $('t-pipe').onclick = function () { tab(true); };
+    // personas
+    D.personas.forEach(function (p) {
+      var b = document.createElement('button'); b.textContent = p.name; b.dataset.id = p.id;
+      b.onclick = function () { setPersona(p.id); }; $('personas').appendChild(b);
+    });
+    // sliders
+    D.features.forEach(function (f) {
+      var w = document.createElement('div'); w.className = 'sl';
+      w.innerHTML = '<label for="s-' + f.key + '">' + f.label + ' <small style="color:var(--muted)">' + f.unit + '</small></label><output id="o-' + f.key + '"></output><input type="range" id="s-' + f.key + '" min="' + f.range[0] + '" max="' + f.range[1] + '" step="' + f.range[2] + '">';
+      $('sliders').appendChild(w);
+      w.querySelector('input').oninput = function (e) { S.x[f.key] = +e.target.value; S.persona = null; markPersona(); render(); };
+    });
+    $('k-gini').textContent = D.meta.gini.toFixed(2);
+    buildGauge(); buildTable(); drawPSI(); buildDist(); buildMap();
+    setPersona(Q.get('persona') || 'driver');
+    if (Q.get('tab') === 'pipeline') tab(true);
+  }
+
+  function setPersona(id) {
+    var p = D.personas.find(function (q) { return q.id === id; }) || D.personas[0];
+    S.persona = p.id; S.x = Object.assign({}, p.x);
+    D.features.forEach(function (f) { $('s-' + f.key).value = S.x[f.key]; });
+    markPersona(); render();
+    if (map && overlay) { overlay.setProps({ layers: layers() }); }
+  }
+  function markPersona() {
+    [].forEach.call($('personas').children, function (b) { b.setAttribute('aria-pressed', b.dataset.id === S.persona); });
+    var p = D.personas.find(function (q) { return q.id === S.persona; });
+    $('about').textContent = p ? p.area + '. ' + p.about : 'Custom applicant.';
+  }
+
+  var LO = 440, HI = 700;
+  function sx(s) { return (Math.max(LO, Math.min(HI, s)) - LO) / (HI - LO) * 100; }
+  function buildGauge() {
+    var g = $('gauge'), m = D.meta;
+    g.innerHTML = '<i style="width:' + sx(m.cut_decline) + '%;background:var(--bad);border-radius:5px 0 0 5px"></i><i style="width:' + (sx(m.cut_approve) - sx(m.cut_decline)) + '%;background:var(--warn)"></i><i style="flex:1;background:var(--good);border-radius:0 5px 5px 0"></i><b id="needle"></b>'
+      + '<span style="left:' + sx(m.cut_decline) + '%">' + m.cut_decline + '</span><span style="left:' + sx(m.cut_approve) + '%">' + m.cut_approve + '</span>';
+  }
+
+  function buildTable() {
+    var h = '';
+    D.features.forEach(function (f) {
+      h += '<table class="pts"><tr class="f"><td colspan="4">' + f.label + ' <small>' + f.unit + ', IV ' + f.iv.toFixed(2) + '</small></td></tr><tr><th>Bin</th><th style="text-align:right">Points</th><th style="text-align:right">Bad rate</th><th></th></tr>';
+      f.bins.forEach(function (b, i) {
+        h += '<tr id="r-' + f.key + '-' + i + '"><td>' + b + '</td><td class="n">' + f.points[i] + '</td><td class="n">' + pct(f.bad_rate[i], 1) + '</td><td class="bar"><i style="width:' + Math.min(100, f.bad_rate[i] / .55 * 100) + '%"></i></td></tr>';
+      });
+      h += '</table>';
+    });
+    $('pts').innerHTML = h;
+  }
+
+  function render() {
+    var total = 0, contrib = [];
+    D.features.forEach(function (f) {
+      var b = binOf(f, S.x[f.key]), p = f.points[b];
+      total += p; contrib.push({ f: f, d: p - f.mean_points });
+      $('o-' + f.key).textContent = fmtVal(f, S.x[f.key]);
+      f.bins.forEach(function (_, i) { $('r-' + f.key + '-' + i).classList.toggle('on', i === b); });
+    });
+    $('score').textContent = total;
+    var bd = band(total); $('band').textContent = bd; $('band').className = 'band ' + bd;
+    var odds = Math.pow(2, (total - D.meta.base) / D.meta.pdo) * D.meta.odds, pbad = 1 / (1 + odds);
+    $('odds').textContent = 'odds ' + (odds >= 10 ? Math.round(odds) : odds.toFixed(1)) + ':1 good to bad · ' + pct(pbad, 1) + ' chance of default';
+    $('needle').style.left = 'calc(' + sx(total) + '% - 1.5px)';
+    contrib.sort(function (a, b) { return Math.abs(b.d) - Math.abs(a.d); });
+    var max = 30, h = '';
+    contrib.forEach(function (c) {
+      var w = Math.min(50, Math.abs(c.d) / max * 50), col = c.d >= 0 ? 'var(--good)' : 'var(--bad)';
+      h += '<span>' + c.f.label + '</span><div class="tr"><b style="background:' + col + ';width:' + w + '%;left:' + (c.d >= 0 ? 50 : 50 - w) + '%"></b></div><span class="v" style="color:' + col + '">' + (c.d >= 0 ? '+' : '') + Math.round(c.d) + '</span>';
+    });
+    $('why').innerHTML = h;
+    if (distMark) distMark(total);
+  }
+
+  // ---------- distribution
+  var distMark = null;
+  function buildDist() {
+    var svg = $('distsvg'), W = 560, H = 230, L = 34, R = 12, T = 12, B = 30;
+    var e = D.dist.edges, ng = D.dist.good.reduce(function (a, b) { return a + b; }), nb = D.dist.bad.reduce(function (a, b) { return a + b; });
+    function sm(a, n) { return a.map(function (_, i) { var s = 0, c = 0; for (var j = i - 1; j <= i + 1; j++) if (j >= 0 && j < a.length) { s += a[j]; c++; } return s / c / n; }); }
+    var dg = sm(D.dist.good, ng), db = sm(D.dist.bad, nb);
+    var ymax = Math.max.apply(null, dg.concat(db)) * 1.1, x0 = e[0], x1 = e[e.length - 1];
+    function X(s) { return L + (s - x0) / (x1 - x0) * (W - L - R); }
+    function Y(v) { return H - B - v / ymax * (H - T - B); }
+    for (var s = Math.ceil(x0 / 50) * 50; s <= x1; s += 50) { el('line', { x1: X(s), x2: X(s), y1: T, y2: H - B, stroke: 'rgba(255,255,255,.07)' }, svg); el('text', { x: X(s), y: H - B + 15, 'text-anchor': 'middle' }, svg).textContent = s; }
+    el('text', { x: W - R, y: H - 2, 'text-anchor': 'end' }, svg).textContent = 'score';
+    function curve(d, col) {
+      var pts = d.map(function (v, i) { return [X((e[i] + e[i + 1]) / 2), Y(v)]; });
+      var p = 'M' + X(x0) + ',' + Y(0) + pts.map(function (q) { return 'L' + q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join('') + 'L' + X(x1) + ',' + Y(0) + 'Z';
+      el('path', { d: p, fill: col, 'fill-opacity': .18, stroke: col, 'stroke-width': 2, 'stroke-linejoin': 'round' }, svg);
+    }
+    curve(db, css('--bad')); curve(dg, css('--good'));
+    var shade = el('rect', { y: T, height: H - T - B, fill: 'rgba(0,0,0,.35)' }, svg);
+    var line = el('line', { y1: T - 4, y2: H - B, stroke: css('--fg'), 'stroke-width': 2 }, svg);
+    var knob = el('circle', { r: 7, cy: T + 4, fill: css('--fg') }, svg);
+    var lab = el('text', { y: T + 8, class: 'lab' }, svg);
+    var me = el('path', { fill: css('--accent') }, svg);
+    var meT = el('text', { 'text-anchor': 'middle', y: H - B - 14, fill: css('--accent') }, svg);
+    distMark = function (s) { var x = X(s); me.setAttribute('d', 'M' + (x - 6) + ',' + (H - B) + 'L' + (x + 6) + ',' + (H - B) + 'L' + x + ',' + (H - B - 9) + 'Z'); meT.setAttribute('x', x); meT.textContent = 'applicant'; };
+    function setCut(c) {
+      c = Math.round(Math.max(x0 + 5, Math.min(x1 - 5, c))); S.cut = c;
+      var x = X(c); line.setAttribute('x1', x); line.setAttribute('x2', x); knob.setAttribute('cx', x);
+      shade.setAttribute('x', L); shade.setAttribute('width', Math.max(0, x - L));
+      lab.setAttribute('x', x + (x > W - 140 ? -10 : 10)); lab.setAttribute('text-anchor', x > W - 140 ? 'end' : 'start'); lab.textContent = 'cutoff ' + c;
+      var ag = 0, ab = 0;
+      for (var i = 0; i < D.dist.good.length; i++) { var mid = (e[i] + e[i + 1]) / 2; if (mid >= c) { ag += D.dist.good[i]; ab += D.dist.bad[i]; } }
+      $('k-appr').textContent = pct((ag + ab) / (ng + nb));
+      $('k-bad').textContent = ag + ab ? pct(ab / (ag + ab), 1) : '–';
+    }
+    setCut(S.cut);
+    function fromEvt(ev) { var r = svg.getBoundingClientRect(); return x0 + ((ev.clientX - r.left) / r.width * W - L) / (W - L - R) * (x1 - x0); }
+    var drag = false;
+    svg.addEventListener('pointerdown', function (ev) { drag = true; svg.setPointerCapture(ev.pointerId); setCut(fromEvt(ev)); });
+    svg.addEventListener('pointermove', function (ev) { if (drag) setCut(fromEvt(ev)); });
+    svg.addEventListener('pointerup', function () { drag = false; });
+  }
+
+  // ---------- PSI
+  function drawPSI() {
+    var svg = $('psisvg'), W = 560, H = 230, L = 40, R = 14, T = 14, B = 28, M = D.months;
+    var ymax = 0.3;
+    function X(i) { return L + i / (M.length - 1) * (W - L - R); }
+    function Y(v) { return H - B - v / ymax * (H - T - B); }
+    [[0.1, '--warn', 'look closer'], [0.25, '--bad', 'rebuild']].forEach(function (t) {
+      el('line', { x1: L, x2: W - R, y1: Y(t[0]), y2: Y(t[0]), stroke: css(t[1]), 'stroke-dasharray': '4 4', 'stroke-opacity': .8 }, svg);
+      el('text', { x: L + 6, y: Y(t[0]) - 4, fill: css(t[1]) }, svg).textContent = t[0] + ' ' + t[2];
+    });
+    [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7].forEach(function (v) { if (v <= ymax) el('text', { x: L - 6, y: Y(v) + 3, 'text-anchor': 'end' }, svg).textContent = v.toFixed(1); });
+    M.forEach(function (m, i) { el('text', { x: X(i), y: H - 8, 'text-anchor': 'middle' }, svg).textContent = m.m; });
+    var last = M[M.length - 1], top = Object.keys(last.csi).sort(function (a, b) { return last.csi[b] - last.csi[a]; })[0];
+    el('path', { d: M.map(function (m, i) { return (i ? 'L' : 'M') + X(i) + ',' + Y(m.psi); }).join(''), fill: 'none', stroke: css('--accent'), 'stroke-width': 2.5 }, svg);
+    M.forEach(function (m, i) { el('circle', { cx: X(i), cy: Y(m.psi), r: 3.5, fill: m.psi >= .25 ? css('--bad') : m.psi >= .1 ? css('--warn') : css('--accent') }, svg); });
+    var first = M.findIndex(function (m) { return m.psi >= 0.1; });
+    $('psinote').textContent = first < 0 ? 'Stable all year.' : 'From August a SIM-bundle campaign brings in many new subscribers. Short tenure pulls the score down and PSI passes 0.1 in ' + M[first].m + '. The same index per feature (CSI) points to the cause: ' + labelOf(top) + ' moved most, CSI ' + last.csi[top].toFixed(2) + ' in ' + last.m + '.';
+  }
+
+  // ---------- map
+  var map = null, overlay = null;
+  var VIR = [[96, 30, 40], [190, 70, 60], [240, 170, 80], [160, 210, 130], [80, 200, 170]];
+  function mix(a, b, t) { return [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * t); }); }
+  function ramp(t) { t = Math.max(0, Math.min(1, t)) * (VIR.length - 1); var i = Math.min(VIR.length - 2, Math.floor(t)); return mix(VIR[i], VIR[i + 1], t - i); }
+  function rng(m) { return m === 'score' ? [540, 585] : [0.35, 0.8]; }
+  function labelOf(k) { return D.features.find(function (f) { return f.key === k; }).label.toLowerCase(); }
+  function buildMap() {
+    $('ramp').style.background = 'linear-gradient(90deg,' + VIR.map(function (c) { return 'rgb(' + c + ')'; }).join(',') + ')';
+    [].forEach.call($('metric').children, function (b) {
+      b.onclick = function () { S.metric = b.dataset.m; [].forEach.call($('metric').children, function (c) { c.setAttribute('aria-pressed', c === b); }); legend(); overlay.setProps({ layers: layers() }); };
+    });
+    legend();
+    map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/dark', center: [106.82, MOBILE ? -6.40 : -6.40], zoom: MOBILE ? 8.5 : 9.35, pitch: 40, bearing: -10, attributionControl: { compact: true }, cooperativeGestures: MOBILE });
+    overlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
+    map.addControl(overlay);
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+    map.on('load', function () { overlay.setProps({ layers: layers() }); });
+  }
+  function legend() {
+    var r = rng(S.metric);
+    $('rlo').textContent = S.metric === 'score' ? r[0] : pct(r[0]); $('rhi').textContent = S.metric === 'score' ? r[1] : pct(r[1]);
+    $('mapnote').textContent = 'Hexes about 2 km across. Height and colour show the ' + (S.metric === 'score' ? 'average score' : 'share approved at cutoff ' + D.meta.cut_approve) + ' of subscribers who sleep there. Hover for what lifts or drags the area.';
+  }
+  function layers() {
+    var r = rng(S.metric), m = S.metric, p = D.personas.find(function (q) { return q.id === S.persona; });
+    var L = [new deck.ColumnLayer({
+      id: 'hex', data: D.hexes, diskResolution: 6, radius: D.hex_radius_m * 0.92, angle: 90, extruded: true, pickable: true,
+      getPosition: function (h) { return [h.lon, h.lat]; },
+      getElevation: function (h) { return Math.max(0, (h[m] - r[0]) / (r[1] - r[0])) * 5000 + 150; },
+      getFillColor: function (h) { return ramp((h[m] - r[0]) / (r[1] - r[0])).concat(235); },
+      material: { ambient: 0.55, diffuse: 0.6, shininess: 20 },
+      updateTriggers: { getElevation: m, getFillColor: m },
+      transitions: { getElevation: 500, getFillColor: 500 },
+      onHover: tipOn
+    })];
+    if (p) L.push(new deck.ScatterplotLayer({ id: 'me', data: [p], getPosition: function (q) { return [q.lon, q.lat]; }, getRadius: 1100, radiusMinPixels: 6, getFillColor: [255, 255, 255], stroked: true, getLineColor: [11, 13, 23], lineWidthMinPixels: 2, parameters: { depthTest: false } }),
+      new deck.TextLayer({ id: 'me-t', data: [p], getPosition: function (q) { return [q.lon, q.lat]; }, getText: function (q) { return q.name; }, getSize: 13, getColor: [255, 255, 255], getPixelOffset: [0, -18], fontFamily: 'Archivo', fontWeight: 700, outlineWidth: 3, outlineColor: [11, 13, 23], fontSettings: { sdf: true }, parameters: { depthTest: false } }));
+    return L;
+  }
+  function tipOn(info) {
+    var t = $('tip'), h = info.object;
+    if (!h) { t.style.display = 'none'; return; }
+    t.innerHTML = '<b>' + h.area + '</b> <span class="r">' + h.n.toLocaleString() + ' subscribers</span><br><span class="r">average score ' + Math.round(h.score) + ' · approved ' + pct(h.approve) + '</span><br>'
+      + '<span style="color:var(--good)">+' + h.up[1].toFixed(0) + ' ' + labelOf(h.up[0]) + '</span><br><span style="color:var(--bad)">' + h.down[1].toFixed(0) + ' ' + labelOf(h.down[0]) + '</span>';
+    t.style.display = 'block';
+    var x = Math.min(info.x + 14, $('map').clientWidth - 260);
+    t.style.left = x + 'px'; t.style.top = (info.y + 14) + 'px';
+  }
+
+  // ---------- pipeline
+  var piped = false;
+  var FAM = { 'Scorecard (WoE + logistic)': '#9a9df0', 'Logistic regression': '#5fd3a5', 'Decision tree': '#ffc15e', 'Random forest': '#e58fd8', 'Gradient boosting': '#ff7a6b', 'Neural network': '#6cc7ff' };
+  function drawPipeline() {
+    if (piped) return; piped = true;
+    var A = D.automl, best = A.reduce(function (a, b) { return b.gini > a.gini ? b : a; });
+    $('ncand').textContent = A.length;
+    var svg = $('lbsvg'), W = 900, H = 330, L = 52, R = 20, T = 16, B = 40;
+    var gmin = Math.floor(Math.min.apply(null, A.map(function (a) { return a.gini; })) * 20) / 20, gmax = Math.ceil(best.gini * 20 + 0.3) / 20;
+    var tmin = 0.005, tmax = 20;
+    function X(s) { return L + (Math.log10(Math.max(tmin, s)) - Math.log10(tmin)) / (Math.log10(tmax) - Math.log10(tmin)) * (W - L - R); }
+    function Y(g) { return H - B - (g - gmin) / (gmax - gmin) * (H - T - B); }
+    [0.01, 0.1, 1, 10].forEach(function (s) { el('line', { x1: X(s), x2: X(s), y1: T, y2: H - B, stroke: 'rgba(255,255,255,.07)' }, svg); el('text', { x: X(s), y: H - B + 16, 'text-anchor': 'middle' }, svg).textContent = s + ' s'; });
+    for (var g = gmin; g <= gmax + 1e-9; g += 0.05) { el('line', { x1: L, x2: W - R, y1: Y(g), y2: Y(g), stroke: 'rgba(255,255,255,.07)' }, svg); el('text', { x: L - 8, y: Y(g) + 3, 'text-anchor': 'end' }, svg).textContent = g.toFixed(2); }
+    el('text', { x: W - R, y: H - 4, 'text-anchor': 'end' }, svg).textContent = 'train time on a laptop (log scale)';
+    el('text', { x: L + 6, y: T + 14 }, svg).textContent = 'Gini, holdout';
+    A.forEach(function (a) {
+      var c = el('circle', { cx: X(a.secs), cy: Y(a.gini), r: a === best ? 8 : 6, fill: FAM[a.family], 'fill-opacity': .85, stroke: a === best ? '#fff' : 'none', 'stroke-width': 2 }, svg);
+      el('title', {}, c).textContent = a.family + ' ' + JSON.stringify(a.cfg) + ': Gini ' + a.gini.toFixed(3) + ', ' + a.secs + ' s';
+    });
+    var sc = A[0];
+    el('text', { x: X(sc.secs) + 12, y: Y(sc.gini) + 18, class: 'lab' }, svg).textContent = 'scorecard ' + sc.gini.toFixed(3);
+    el('text', { x: X(best.secs) + 12, y: Y(best.gini) - 10, class: 'lab' }, svg).textContent = 'best ' + best.gini.toFixed(3);
+    $('lblegend').innerHTML = Object.keys(FAM).map(function (k) { return '<span><i style="background:' + FAM[k] + '"></i>' + k + '</span>'; }).join('');
+    var top = A.slice().sort(function (a, b) { return b.gini - a.gini; }).slice(0, 10);
+    $('lb').innerHTML = '<tr><th>#</th><th>Model</th><th>Settings</th><th style="text-align:right">Gini</th><th style="text-align:right">Secs</th></tr>' + top.map(function (a, i) {
+      var cfg = Object.keys(a.cfg).map(function (k) { return k + ' ' + a.cfg[k]; }).join(', ') || 'fixed bins';
+      return '<tr class="' + (i ? '' : 'best') + '"><td>' + (i + 1) + '</td><td>' + a.family + '</td><td style="color:var(--muted)">' + cfg + '</td><td class="n">' + a.gini.toFixed(3) + '</td><td class="n">' + a.secs.toFixed(2) + '</td></tr>';
+    }).join('');
+    var rt = $('rtsvg');
+    [['before', 100, css('--muted')], ['after', 25, css('--accent')]].forEach(function (r, i) {
+      var y = 20 + i * 56, w = r[1] / 100 * 400;
+      el('text', { x: 0, y: y + 22, class: 'lab' }, rt).textContent = r[0];
+      el('rect', { x: 60, y: y, width: w, height: 34, rx: 4, fill: r[2] }, rt);
+      el('text', { x: 60 + w + 8, y: y + 22, class: 'lab' }, rt).textContent = r[1];
+    });
+  }
+})();
+</script>
+</body>
+</html>
